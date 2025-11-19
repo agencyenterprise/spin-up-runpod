@@ -12,5 +12,10 @@ build/
 .venv/
 venv/
 
+# Config files with actual credentials/IDs
+*_pod.yaml
+my_*.yaml
+!example_config.yaml
+
 .cursorindexingignore
 .specstory/
