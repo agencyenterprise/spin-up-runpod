@@ -36,13 +36,13 @@ Copy the **exact GPU ID** (e.g., `NVIDIA A100 80GB PCIe`, not just `A100`).
 
 ### 4. Configure Your Pod
 
-Edit `selfie_pod.yaml`:
+Edit `example_config.yaml`:
 
 ```yaml
 disk_space_gb: 200
 gpu_type: NVIDIA A100 80GB PCIe  # Use exact GPU type ID from list_gpus.py
 num_gpus: 1
-network_volume_id: wup549p1f2
+network_volume_id: xvq549q1g2
 pod_name: My-Project
 requirements_file: /workspace/my-project/requirements.txt
 template_id: runpod-torch-v280
@@ -54,7 +54,7 @@ vscode_extensions:
 ### 5. Run It!
 
 ```bash
-python setup_runpod.py selfie_pod.yaml
+python setup_runpod.py example_config.yaml
 ```
 
 The script will:
@@ -74,7 +74,7 @@ The script will:
 | `disk_space_gb` | Disk space (reference only) | `200` |
 | `gpu_type` | **Exact** GPU type ID | `NVIDIA A100 80GB PCIe` |
 | `num_gpus` | Number of GPUs | `1` |
-| `network_volume_id` | Your network volume ID | `wup549p1f2` |
+| `network_volume_id` | Your network volume ID | `xvq549q1g2` |
 | `pod_name` | Pod name (spaces → dashes in SSH) | `My-Project` |
 | `requirements_file` | Path to requirements.txt on remote | `/workspace/project/requirements.txt` |
 | `template_id` | RunPod template ID | `runpod-torch-v280` |
