@@ -304,6 +304,14 @@ def setup_remote_environment(pod_name, config):
         f"if [ -f {requirements_file} ]; then {venv_path}/bin/pip install -r {requirements_file}; else echo 'Requirements file not found: {requirements_file}'; fi"
     ]
     
+    # Add git configuration if user details are provided
+    user_email = config.get("user_email")
+    user_name = config.get("user_name")
+    if user_email:
+        commands.append(f'git config --global user.email "{user_email}"')
+    if user_name:
+        commands.append(f'git config --global user.name "{user_name}"')
+    
     for i, cmd in enumerate(commands, 1):
         print(f"\n   [{i}/{len(commands)}] Running: {cmd[:80]}...")
         

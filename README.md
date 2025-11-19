@@ -9,6 +9,7 @@ Automate the entire process of creating and setting up a new RunPod instance - f
 - 🐍 Creates Python virtual environment and installs dependencies
 - 🔌 Installs VS Code extensions (Python, etc.)
 - 📍 Auto-detects datacenter from your network volume
+- 👤 Configures git user identity (name and email)
 - ⏱️ **Saves ~10-15 minutes of manual setup per pod**
 
 ## Quick Start
@@ -46,6 +47,8 @@ network_volume_id: xvq549q1g2
 pod_name: My-Project
 requirements_file: /workspace/my-project/requirements.txt
 template_id: runpod-torch-v280
+user_email: you@example.com
+user_name: Your Name
 venv_path: /tmp/venv
 vscode_extensions:
   - ms-python.python
@@ -61,7 +64,7 @@ The script will:
 1. Create the pod
 2. Configure SSH
 3. Prompt you to **open Cursor/VS Code** (do this while it continues)
-4. Set up Python environment (while you're connecting)
+4. Set up Python environment and git config (while you're connecting)
 5. Install extensions automatically
 6. Report completion
 
@@ -78,6 +81,8 @@ The script will:
 | `pod_name` | Pod name (spaces → dashes in SSH) | `My-Project` |
 | `requirements_file` | Path to requirements.txt on remote | `/workspace/project/requirements.txt` |
 | `template_id` | RunPod template ID | `runpod-torch-v280` |
+| `user_email` | Git user email (optional) | `you@example.com` |
+| `user_name` | Git user name (optional) | `Your Name` |
 | `venv_path` | Where to create venv | `/tmp/venv` |
 | `vscode_extensions` | List of extension IDs (optional) | `["ms-python.python"]` |
 
@@ -85,6 +90,7 @@ The script will:
 - Datacenter is automatically detected from your network volume
 - Pod names with spaces get sanitized for SSH (e.g., "My Pod" → "My-Pod")
 - Omit `vscode_extensions` or use `[]` to skip extension installation
+- `user_email` and `user_name` are optional but recommended for git commits
 
 ## Discovery Tools
 
@@ -169,7 +175,7 @@ Edit `setup_remote_environment()` in the script to add:
 
 1. **Pod Creation**: Queries SSH keys, detects datacenter, creates pod via API
 2. **SSH Configuration**: Updates `~/.ssh/config` with connection details
-3. **Environment Setup**: Creates venv, installs pip packages (you connect during this)
+3. **Environment Setup**: Creates venv, installs pip packages, configures git identity (you connect during this)
 4. **Extension Installation**: Automatically installs VS Code extensions once code-server is ready
 5. **Ready to Code**: Everything configured, just start coding!
 

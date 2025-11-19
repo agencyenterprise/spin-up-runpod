@@ -5,6 +5,8 @@ network_volume_id: {your_volume_id}
 pod_name: My-Project
 requirements_file: /workspace/my-project/requirements.txt
 template_id: runpod-torch-v280
+user_email: you@example.com
+user_name: Your Name
 venv_path: /tmp/venv
 vscode_extensions:
   - ms-python.python
