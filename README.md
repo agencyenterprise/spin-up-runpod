@@ -57,7 +57,7 @@ vscode_extensions:
 ### 5. Run It!
 
 ```bash
-python setup_runpod.py example_config.yaml
+python spin_up_runpod.py example_config.yaml
 ```
 
 The script will:
@@ -151,8 +151,8 @@ python manage_pods.py terminate <pod_id>
 ### Multiple Projects
 Create different YAML files:
 ```bash
-python setup_runpod.py project1.yaml
-python setup_runpod.py project2.yaml
+python spin_up_runpod.py project1.yaml
+python spin_up_runpod.py project2.yaml
 ```
 
 ### Custom Extensions

@@ -501,7 +501,7 @@ echo "Settings created in {workspace_dir}/.vscode/settings.json"
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python setup_runpod.py <config.yaml>")
+        print("Usage: python spin_up_runpod.py <config.yaml>")
         sys.exit(1)
     
     config_file = sys.argv[1]
