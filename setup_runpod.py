@@ -97,12 +97,18 @@ def create_pod(config):
     ssh_keys = get_ssh_keys()
     print("✓ Retrieved SSH keys from account")
     
-    # Get datacenter from network volume
-    datacenter_id = get_network_volume_datacenter(config["network_volume_id"])
-    if datacenter_id:
-        print(f"✓ Detected datacenter: {datacenter_id} (from network volume)")
+    # Get datacenter from network volume (if provided)
+    network_volume_id = config.get("network_volume_id")
+    datacenter_id = None
+    
+    if network_volume_id:
+        datacenter_id = get_network_volume_datacenter(network_volume_id)
+        if datacenter_id:
+            print(f"✓ Detected datacenter: {datacenter_id} (from network volume)")
+        else:
+            print("⚠️  Could not detect datacenter from network volume")
     else:
-        print("⚠️  Could not detect datacenter from network volume")
+        print("✓ No network volume specified - searching all datacenters")
     
     # Prepare environment variables (critical for SSH access!)
     env_vars = [{"key": "PUBLIC_KEY", "value": ssh_keys}]
@@ -130,16 +136,24 @@ def create_pod(config):
         "gpuCount": config["num_gpus"],
         "name": config["pod_name"],
         "templateId": config["template_id"],
-        "networkVolumeId": config["network_volume_id"],
         "env": env_vars
     }
+    
+    # Add network volume if provided  
+    if network_volume_id:
+        input_data["networkVolumeId"] = network_volume_id
+    else:
+        # Without network volume, specify disk storage
+        # Templates handle SSH port exposure automatically
+        input_data["volumeInGb"] = config.get("disk_space_gb", 200)
+        print(f"✓ Configuring pod disk: {input_data['volumeInGb']}GB (no network volume)")
     
     # Add datacenter (automatically detected from network volume)
     if datacenter_id:
         input_data["dataCenterId"] = datacenter_id
     
-    # Note: When using a template, we don't specify containerDiskInGb, ports, imageName, or volumeMountPath
-    # The disk_space_gb in config is for reference but template handles this
+    # Note: When using a template WITH a network volume, we don't specify containerDiskInGb, ports, imageName, or volumeMountPath
+    # Without a network volume, we need to specify ports explicitly
     
     variables = {"input": input_data}
     
