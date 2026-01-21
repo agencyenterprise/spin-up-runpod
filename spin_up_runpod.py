@@ -142,6 +142,10 @@ def create_pod(config):
     # Add network volume if provided  
     if network_volume_id:
         input_data["networkVolumeId"] = network_volume_id
+        # Container disk (root filesystem at /) - separate from network volume at /workspace
+        input_data["containerDiskInGb"] = config.get("disk_space_gb", 200)
+        print(f"✓ Configuring container disk: {input_data['containerDiskInGb']}GB (for root /)")
+        print(f"✓ Using network volume: {network_volume_id} (for /workspace)")
     else:
         # Without network volume, specify disk storage
         # Templates handle SSH port exposure automatically
@@ -152,8 +156,8 @@ def create_pod(config):
     if datacenter_id:
         input_data["dataCenterId"] = datacenter_id
     
-    # Note: When using a template WITH a network volume, we don't specify containerDiskInGb, ports, imageName, or volumeMountPath
-    # Without a network volume, we need to specify ports explicitly
+    # Note: Templates handle SSH port exposure and image configuration automatically
+    # containerDiskInGb controls the root (/) filesystem size, separate from network volume
     
     variables = {"input": input_data}
     
