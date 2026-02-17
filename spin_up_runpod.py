@@ -309,18 +309,22 @@ def setup_remote_environment(pod_name, config):
     print("\n🔧 Setting up remote environment...")
     
     venv_path = config["venv_path"]
-    requirements_file = config["requirements_file"]
+    requirements_file = config.get("requirements_file")
+    requirements_override_file = config.get("requirements_override_file")
     
     commands = [
-        # Create venv
-        f"python3 -m venv {venv_path}",
-        
-        # Upgrade pip
-        f"{venv_path}/bin/pip install --upgrade pip",
-        
-        # Install requirements if file exists
-        f"if [ -f {requirements_file} ]; then {venv_path}/bin/pip install -r {requirements_file}; else echo 'Requirements file not found: {requirements_file}'; fi"
+        # Create venv with uv
+        f"uv venv {venv_path}",
     ]
+    
+    # Install requirements if configured and file exists on remote
+    if requirements_file:
+        install_cmd = f"uv pip install --python {venv_path}/bin/python -r {requirements_file}"
+        if requirements_override_file:
+            install_cmd += f" --override {requirements_override_file}"
+        commands.append(
+            f"if [ -f {requirements_file} ]; then {install_cmd}; else echo 'Requirements file not found: {requirements_file}'; fi"
+        )
     
     # Add git configuration if user details are provided
     user_email = config.get("user_email")
@@ -557,7 +561,7 @@ def main():
                 
                 print("\n⏳ Continuing with environment setup...\n")
             
-            # Phase 5: Setup remote environment (pip install happens here)
+            # Phase 5: Setup remote environment (uv install happens here)
             setup_remote_environment(ssh_host_name, config)
             
             # Phase 6: Install VS Code extensions (if specified)
@@ -581,7 +585,7 @@ def main():
             print("\n✅ Everything is configured:")
             print(f"   • SSH access: ssh {ssh_host_name}")
             print(f"   • Python environment: {config['venv_path']}")
-            print("   • Dependencies installed from requirements.txt")
+            print("   • Dependencies installed via uv")
             print("   • VS Code extensions installed")
             print("   • Python interpreter configured")
             print("\n🚀 Your Cursor/VS Code window should be ready to code!")
@@ -590,7 +594,7 @@ def main():
             print("\n✅ Environment configured:")
             print(f"   • SSH access: ssh {ssh_host_name}")
             print(f"   • Python environment: {config['venv_path']}")
-            print("   • Dependencies installed from requirements.txt")
+            print("   • Dependencies installed via uv")
             print("   • Python interpreter configured")
             print("\n💡 Next: Install Python extension via Extensions panel in Cursor")
             print("   Then the interpreter should auto-select!")

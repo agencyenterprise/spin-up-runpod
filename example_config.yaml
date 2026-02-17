@@ -4,6 +4,7 @@ num_gpus: 1
 network_volume_id: {your_volume_id}  # Optional - include to use a specific network volume
 pod_name: My-Project
 requirements_file: /workspace/my-project/requirements.txt
+requirements_override_file: /workspace/my-project/requirements-override.txt  # Optional - uv --override file
 template_id: runpod-torch-v280
 user_email: you@example.com
 user_name: Your Name
