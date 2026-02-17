@@ -401,7 +401,15 @@ def wait_for_code_server(pod_name, max_wait=180):
 
 
 def install_vscode_extensions(pod_name, extensions):
-    """Install VS Code extensions on the remote via SSH."""
+    """Install VS Code extensions on the remote via SSH.
+    
+    Works around a Cursor bug where cursor-server's --install-extension fails
+    because it requests a platform-specific VSIX (linux-x64) that doesn't exist
+    for universal extensions, then tries to unzip the 404 JSON error response.
+    
+    Instead, we download the universal VSIX from the marketplace directly and
+    extract it to the cursor-server extensions directory.
+    """
     print("\n🔌 Installing VS Code extensions on remote...")
     
     # First check if code-server exists
@@ -415,19 +423,72 @@ def install_vscode_extensions(pod_name, extensions):
     else:
         print("✓ Code server detected")
     
-    # Now install extensions
+    # Install extensions by downloading universal VSIX and extracting manually
+    all_succeeded = True
     for ext in extensions:
         print(f"\n   Installing {ext}...")
         
+        # Parse publisher.name format
+        parts = ext.split(".")
+        if len(parts) < 2:
+            print(f"   ⚠️  Invalid extension ID: {ext} (expected publisher.name)")
+            all_succeeded = False
+            continue
+        publisher = parts[0]
+        ext_name = ".".join(parts[1:])
+        
+        # Download universal VSIX (no ?targetPlatform to avoid 404 on universal extensions),
+        # extract to cursor-server extensions directory, and register in extensions.json
         install_cmd = f"""
-# Find the code-server binary
-CODE_SERVER=$(find ~/.vscode-server/bin ~/.cursor-server/bin -name 'code-server' -o -name 'cursor-server' 2>/dev/null | head -1)
-if [ -n "$CODE_SERVER" ]; then
-    "$CODE_SERVER" --install-extension {ext} 2>&1
-else
-    echo "ERROR: Could not find code-server binary"
+set -e
+VSIX_URL="https://marketplace.visualstudio.com/_apis/public/gallery/publishers/{publisher}/vsextensions/{ext_name}/latest/vspackage"
+TMPFILE=$(mktemp /tmp/ext-XXXXXX.vsix)
+
+# Download with --compressed to handle gzip Content-Encoding
+curl -fsSL --compressed -o "$TMPFILE" "$VSIX_URL"
+
+# Verify it's actually a zip file
+if ! unzip -t "$TMPFILE" > /dev/null 2>&1; then
+    echo "ERROR: Downloaded file is not a valid zip"
+    rm -f "$TMPFILE"
     exit 1
 fi
+
+# Read version from the VSIX package.json
+VERSION=$(unzip -p "$TMPFILE" extension/package.json | python3 -c "import sys,json; print(json.load(sys.stdin)['version'])")
+EXT_DIR=~/.cursor-server/extensions/{ext}-"$VERSION"
+
+# Extract (the VSIX contains an extension/ subdirectory with the actual extension)
+mkdir -p "$EXT_DIR"
+unzip -q -o "$TMPFILE" "extension/*" -d /tmp/ext-extract-$$
+cp -a /tmp/ext-extract-$$/extension/* "$EXT_DIR"/
+
+# Register in extensions.json so cursor-server recognizes it
+EXTENSIONS_JSON=~/.cursor-server/extensions/extensions.json
+if [ ! -f "$EXTENSIONS_JSON" ]; then
+    echo '[]' > "$EXTENSIONS_JSON"
+fi
+python3 -c "
+import json, sys
+path = '$EXTENSIONS_JSON'
+with open(path) as f:
+    exts = json.load(f)
+# Remove any existing entry for this extension
+exts = [e for e in exts if e.get('identifier', {{}}).get('id', '').lower() != '{ext}'.lower()]
+exts.append({{
+    'identifier': {{'id': '{ext}'}},
+    'version': '$VERSION',
+    'location': {{'path': '$EXT_DIR', 'scheme': 'file'}},
+    'relativeLocation': '{ext}-$VERSION',
+    'metadata': {{'installedTimestamp': $(date +%s000)}}
+}})
+with open(path, 'w') as f:
+    json.dump(exts, f, indent=2)
+"
+
+rm -f "$TMPFILE"
+rm -rf /tmp/ext-extract-$$
+echo "OK:$VERSION"
 """
         
         try:
@@ -435,24 +496,34 @@ fi
                 ["ssh", pod_name, install_cmd],
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=120
             )
             
-            if result.returncode == 0:
-                print(f"   ✓ Installed {ext}")
-                if result.stdout and "already installed" not in result.stdout.lower():
-                    print(f"      {result.stdout.strip()[:100]}")
+            output = result.stdout.strip()
+            if result.returncode == 0 and output.startswith("OK:"):
+                version = output.split(":", 1)[1]
+                print(f"   ✓ Installed {ext} v{version}")
             else:
                 print(f"   ⚠️  Failed to install {ext}")
-                if result.stdout:
-                    print(f"      {result.stdout[:150]}")
+                if output:
+                    print(f"      {output[:200]}")
+                if result.stderr:
+                    print(f"      {result.stderr.strip()[:200]}")
+                all_succeeded = False
         except subprocess.TimeoutExpired:
             print(f"   ⚠️  Timeout installing {ext}")
+            all_succeeded = False
         except Exception as e:
             print(f"   ⚠️  Error installing {ext}: {e}")
+            all_succeeded = False
     
-    print("\n✅ Extension installation complete!")
-    return True
+    if all_succeeded:
+        print("\n✅ Extension installation complete!")
+        print("   ↻ You may need to reload the Cursor window (Cmd+Shift+P → 'Developer: Reload Window')")
+    else:
+        print("\n⚠️  Some extensions failed to install")
+        print(f"   You can install manually via the Extensions panel in Cursor")
+    return all_succeeded
 
 
 def create_vscode_settings_remote(ssh_host_name, config):
