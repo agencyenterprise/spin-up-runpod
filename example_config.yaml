@@ -8,6 +8,7 @@ requirements_override_file: /workspace/my-project/requirements-override.txt  # O
 template_id: runpod-torch-v280
 user_email: you@example.com
 user_name: Your Name
+uv_cache_dir: /workspace/.uv-cache
 venv_path: /tmp/venv
 vscode_extensions:
   - ms-python.python
