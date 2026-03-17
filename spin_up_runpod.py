@@ -311,15 +311,19 @@ def setup_remote_environment(pod_name, config):
     venv_path = config["venv_path"]
     requirements_file = config.get("requirements_file")
     requirements_override_file = config.get("requirements_override_file")
+    uv_cache_dir = config.get("uv_cache_dir")
+    
+    uv_env_prefix = f"UV_CACHE_DIR={uv_cache_dir} " if uv_cache_dir else ""
+    
+    if uv_cache_dir:
+        print(f"   UV cache: {uv_cache_dir} (persistent)")
     
     commands = [
-        # Create venv with uv
-        f"uv venv {venv_path}",
+        f"{uv_env_prefix}uv venv {venv_path}",
     ]
     
-    # Install requirements if configured and file exists on remote
     if requirements_file:
-        install_cmd = f"uv pip install --python {venv_path}/bin/python -r {requirements_file}"
+        install_cmd = f"{uv_env_prefix}uv pip install --python {venv_path}/bin/python -r {requirements_file}"
         if requirements_override_file:
             install_cmd += f" --override {requirements_override_file}"
         commands.append(
