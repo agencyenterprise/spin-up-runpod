@@ -16,6 +16,7 @@ user_email: you@example.com
 user_name: Your Name
 uv_cache_dir: /workspace/.uv-cache
 venv_path: /tmp/venv
+python_version: "3.12"  # optional; uv will download this version if needed
 claude_config_dir_in_bashrc: true  # optional: export CLAUDE_CONFIG_DIR=/workspace/.claude in ~/.bashrc
 vscode_extensions:
   - ms-python.python

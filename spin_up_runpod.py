@@ -491,11 +491,16 @@ def setup_remote_environment(pod_name, config):
     requirements_file = config.get("requirements_file")
     requirements_override_file = config.get("requirements_override_file")
     uv_cache_dir = config.get("uv_cache_dir")
-    
+    # Default to a modern Python; uv will download it if the system Python
+    # doesn't match. Important on the runpod-ubuntu CPU template, which
+    # ships only Python 3.8.
+    python_version = str(config.get("python_version", "3.12"))
+
     uv_env_prefix = f"UV_CACHE_DIR={uv_cache_dir} " if uv_cache_dir else ""
     
     if uv_cache_dir:
         print(f"   UV cache: {uv_cache_dir} (persistent)")
+    print(f"   Python version: {python_version} (uv will download if needed)")
     
     commands = []
 
@@ -525,7 +530,7 @@ def setup_remote_environment(pod_name, config):
         )
     
     commands.append(
-        f"{uv_env_prefix}uv venv {venv_path}",
+        f"{uv_env_prefix}uv venv --python {python_version} {venv_path}",
     )
     
     if requirements_file:

@@ -32,6 +32,8 @@ cloud_type: ALL  # ALL, SECURE, or COMMUNITY
 # Remote environment setup (same as GPU configs)
 venv_path: /tmp/venv
 uv_cache_dir: /workspace/.uv-cache
+python_version: "3.12"  # uv will download if the system Python differs
+                        # (runpod-ubuntu ships only 3.8, so this matters)
 # requirements_file: /workspace/my-project/requirements.txt
 # requirements_override_file: /workspace/my-project/requirements-override.txt
 user_email: you@example.com
