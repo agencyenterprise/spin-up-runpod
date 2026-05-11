@@ -6,9 +6,16 @@ pod_name: My-Project
 requirements_file: /workspace/my-project/requirements.txt
 requirements_override_file: /workspace/my-project/requirements-override.txt  # Optional - uv --override file
 template_id: runpod-torch-v280
+# Optional: only schedule on hosts whose NVIDIA driver supports at least this CUDA version.
+# Valid values: "13.0", "12.9", "12.8", "12.7", "12.6", "12.5", "12.4",
+#               "12.3", "12.2", "12.1", "12.0", "11.8".
+# min_cuda_version: "13.0"
+# Alternatively, restrict to a specific allow-list:
+# allowed_cuda_versions: ["13.0"]
 user_email: you@example.com
 user_name: Your Name
 uv_cache_dir: /workspace/.uv-cache
 venv_path: /tmp/venv
+claude_config_dir_in_bashrc: true  # optional: export CLAUDE_CONFIG_DIR=/workspace/.claude in ~/.bashrc
 vscode_extensions:
   - ms-python.python

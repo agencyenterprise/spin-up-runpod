@@ -155,6 +155,19 @@ def create_pod(config):
     # Add datacenter (automatically detected from network volume)
     if datacenter_id:
         input_data["dataCenterId"] = datacenter_id
+
+    # CUDA driver version filtering (host driver, independent of template/image).
+    # Valid enum values per RunPod API:
+    #   "13.0", "12.9", "12.8", "12.7", "12.6", "12.5", "12.4",
+    #   "12.3", "12.2", "12.1", "12.0", "11.8"
+    min_cuda_version = config.get("min_cuda_version")
+    allowed_cuda_versions = config.get("allowed_cuda_versions")
+    if min_cuda_version:
+        input_data["minCudaVersion"] = str(min_cuda_version)
+        print(f"✓ Requiring host CUDA driver >= {min_cuda_version}")
+    if allowed_cuda_versions:
+        input_data["allowedCudaVersions"] = [str(v) for v in allowed_cuda_versions]
+        print(f"✓ Restricting host CUDA driver to: {input_data['allowedCudaVersions']}")
     
     # Note: Templates handle SSH port exposure and image configuration automatically
     # containerDiskInGb controls the root (/) filesystem size, separate from network volume
@@ -275,7 +288,7 @@ Host {ssh_host_name}
     return ssh_host_name  # Return the sanitized name for use in other functions
 
 
-def wait_for_ssh(pod_name, max_attempts=30):
+def wait_for_ssh(pod_name, max_attempts=60):
     """Wait for SSH to become available."""
     print("\n⏳ Waiting for SSH to become available...")
     
@@ -300,7 +313,7 @@ def wait_for_ssh(pod_name, max_attempts=30):
         print(f"   Attempt {attempt + 1}/{max_attempts}...")
         time.sleep(5)
     
-    print(f"❌ SSH did not become available after {max_attempts} attempts")
+    print(f"❌ SSH did not become available after {max_attempts} attempts (custom images may need more time)")
     return False
 
 
@@ -318,9 +331,20 @@ def setup_remote_environment(pod_name, config):
     if uv_cache_dir:
         print(f"   UV cache: {uv_cache_dir} (persistent)")
     
-    commands = [
+    commands = []
+    
+    if config.get("claude_config_dir_in_bashrc", False):
+        print("   ~/.bashrc: append export CLAUDE_CONFIG_DIR=/workspace/.claude (if missing)")
+        # Append CLAUDE_CONFIG_DIR to ~/.bashrc (idempotent: skip if line already present)
+        commands.append(
+            "LINE='export CLAUDE_CONFIG_DIR=/workspace/.claude'; "
+            "touch ~/.bashrc; "
+            'grep -qxF "$LINE" ~/.bashrc 2>/dev/null || echo "$LINE" >> ~/.bashrc'
+        )
+    
+    commands.append(
         f"{uv_env_prefix}uv venv {venv_path}",
-    ]
+    )
     
     if requirements_file:
         install_cmd = f"{uv_env_prefix}uv pip install --python {venv_path}/bin/python -r {requirements_file}"
@@ -526,7 +550,7 @@ echo "OK:$VERSION"
         print("   ↻ You may need to reload the Cursor window (Cmd+Shift+P → 'Developer: Reload Window')")
     else:
         print("\n⚠️  Some extensions failed to install")
-        print(f"   You can install manually via the Extensions panel in Cursor")
+        print("   You can install manually via the Extensions panel in Cursor")
     return all_succeeded
 
 
