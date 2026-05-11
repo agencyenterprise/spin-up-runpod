@@ -1,0 +1,44 @@
+# CPU-only RunPod config.
+#
+# CPU pods are created via the REST API (POST https://rest.runpod.io/v1/pods),
+# not the GraphQL `podFindAndDeployOnDemand` mutation, which is GPU-only.
+
+compute_type: cpu  # required to take the CPU codepath
+
+pod_name: my-cpu-pod
+template_id: runpod-ubuntu  # CPU-friendly template; custom images are not
+                            # supported by the CPU pod API at the moment.
+
+# CPU sizing
+# Valid cpu_flavors: cpu3c, cpu3g, cpu3m, cpu5c, cpu5g, cpu5m
+#   - cpu3* = 3rd-gen, cpu5* = 5th-gen
+#   - *c = compute-optimized, *g = general, *m = memory-optimized
+cpu_flavors:
+  - cpu3c
+  - cpu5c
+vcpu_count: 4
+cpu_flavor_priority: availability  # or "custom" to honor cpu_flavors order
+
+# Storage
+disk_space_gb: 50
+# network_volume_id: your_volume_id  # optional; mounts at /workspace and pins
+                                     # the pod to the volume's datacenter
+# data_center_ids: [EU-RO-1, US-KS-2]  # optional; ignored if a network volume
+                                       # is set (datacenter is derived from it)
+
+# Cloud + scheduling
+cloud_type: SECURE  # SECURE or COMMUNITY
+interruptible: false  # true => spot pricing, can be preempted
+ports:
+  - 22/tcp
+
+# Remote environment setup (same as GPU configs)
+venv_path: /tmp/venv
+uv_cache_dir: /workspace/.uv-cache
+# requirements_file: /workspace/my-project/requirements.txt
+# requirements_override_file: /workspace/my-project/requirements-override.txt
+user_email: you@example.com
+user_name: Your Name
+claude_config_dir_in_bashrc: true
+vscode_extensions:
+  - ms-python.python

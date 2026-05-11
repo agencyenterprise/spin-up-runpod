@@ -28,6 +28,11 @@ if not RUNPOD_API_KEY:
     sys.exit(1)
 
 RUNPOD_API_URL = "https://api.runpod.io/graphql"
+RUNPOD_REST_URL = "https://rest.runpod.io/v1"
+
+# CPU flavor IDs accepted by the RunPod REST API (computeType=CPU).
+# Source: https://docs.runpod.io/api-reference/pods/POST/pods
+CPU_FLAVOR_IDS = ["cpu3c", "cpu3g", "cpu3m", "cpu5c", "cpu5g", "cpu5m"]
 
 
 def graphql_query(query, variables=None):
@@ -182,6 +187,116 @@ def create_pod(config):
     print(f"✅ Pod created! ID: {pod['id']}")
     print(f"   GPU: {pod['machine']['gpuDisplayName']}")
     
+    return pod["id"]
+
+
+def create_cpu_pod(config):
+    """Create a CPU-only RunPod via the REST API.
+
+    Uses POST https://rest.runpod.io/v1/pods with computeType=CPU. The legacy
+    GraphQL `podFindAndDeployOnDemand` mutation is GPU-only, and the
+    `deployCpuPod` mutation is undocumented; the REST endpoint is the
+    officially supported way to create CPU pods.
+    """
+    print(f"\n🚀 Creating CPU pod: {config['pod_name']}")
+
+    ssh_keys = get_ssh_keys()
+    print("✓ Retrieved SSH keys from account")
+
+    # Detect datacenter from network volume (CPU pods, like GPU pods, must run
+    # in the same datacenter as any attached network volume).
+    network_volume_id = config.get("network_volume_id")
+    datacenter_id = None
+    if network_volume_id:
+        datacenter_id = get_network_volume_datacenter(network_volume_id)
+        if datacenter_id:
+            print(f"✓ Detected datacenter: {datacenter_id} (from network volume)")
+        else:
+            print("⚠️  Could not detect datacenter from network volume")
+    else:
+        print("✓ No network volume specified - searching all datacenters")
+
+    # Validate CPU flavors.
+    cpu_flavors = config.get("cpu_flavors")
+    if not cpu_flavors:
+        raise ValueError(
+            "CPU pod config must specify `cpu_flavors` (e.g. [cpu3c, cpu5c]). "
+            f"Valid values: {CPU_FLAVOR_IDS}"
+        )
+    invalid = [f for f in cpu_flavors if f not in CPU_FLAVOR_IDS]
+    if invalid:
+        raise ValueError(
+            f"Invalid cpu_flavors: {invalid}. Valid values: {CPU_FLAVOR_IDS}"
+        )
+
+    vcpu_count = config.get("vcpu_count", 2)
+    cpu_flavor_priority = config.get("cpu_flavor_priority", "availability")
+    if cpu_flavor_priority not in ("availability", "custom"):
+        raise ValueError(
+            f"cpu_flavor_priority must be 'availability' or 'custom', got: {cpu_flavor_priority}"
+        )
+
+    # Build REST payload. Note: the REST API takes env as an object
+    # ({KEY: value}), unlike the GraphQL API which takes a list of
+    # {key, value} pairs.
+    payload = {
+        "computeType": "CPU",
+        "cloudType": config.get("cloud_type", "SECURE"),
+        "name": config["pod_name"],
+        "templateId": config["template_id"],
+        "cpuFlavorIds": cpu_flavors,
+        "cpuFlavorPriority": cpu_flavor_priority,
+        "vcpuCount": vcpu_count,
+        "env": {"PUBLIC_KEY": ssh_keys},
+        "ports": config.get("ports", ["22/tcp"]),
+        "interruptible": config.get("interruptible", False),
+    }
+
+    if network_volume_id:
+        payload["networkVolumeId"] = network_volume_id
+        payload["containerDiskInGb"] = config.get("disk_space_gb", 50)
+        print(f"✓ Container disk: {payload['containerDiskInGb']}GB (root /)")
+        print(f"✓ Network volume: {network_volume_id} (mounted at /workspace)")
+    else:
+        payload["volumeInGb"] = config.get("disk_space_gb", 50)
+        print(f"✓ Pod volume: {payload['volumeInGb']}GB (no network volume)")
+
+    if datacenter_id:
+        # REST API takes a list of acceptable datacenters. Pin to the network
+        # volume's datacenter when one is set.
+        payload["dataCenterIds"] = [datacenter_id]
+    elif config.get("data_center_ids"):
+        payload["dataCenterIds"] = config["data_center_ids"]
+
+    print(
+        f"✓ Requesting {vcpu_count} vCPU(s) on flavors {cpu_flavors} "
+        f"(priority={cpu_flavor_priority})"
+    )
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {RUNPOD_API_KEY}",
+    }
+    response = requests.post(
+        f"{RUNPOD_REST_URL}/pods", json=payload, headers=headers
+    )
+    if response.status_code >= 400:
+        # Surface the API error body so the user can see what was wrong with
+        # the request (e.g. invalid flavor, no availability, bad template).
+        try:
+            err_body = response.json()
+        except ValueError:
+            err_body = response.text
+        raise Exception(
+            f"RunPod REST error {response.status_code}: {json.dumps(err_body, indent=2) if isinstance(err_body, dict) else err_body}"
+        )
+
+    pod = response.json()
+    print(f"✅ CPU pod created! ID: {pod['id']}")
+    flavor = pod.get("cpuFlavorId") or "(pending assignment)"
+    print(f"   CPU flavor: {flavor}")
+    print(f"   vCPUs: {pod.get('vcpuCount', vcpu_count)}")
+
     return pod["id"]
 
 
@@ -617,15 +732,24 @@ def main():
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
     
+    compute_type = str(config.get("compute_type", "gpu")).lower()
+    if compute_type not in ("gpu", "cpu"):
+        print(f"❌ Error: compute_type must be 'gpu' or 'cpu', got: {compute_type}")
+        sys.exit(1)
+
     print("🎯 RunPod Automation Script")
     print("=" * 50)
     print(f"Config: {config_file}")
     print(f"Pod Name: {config['pod_name']}")
     print(f"Template: {config['template_id']}")
+    print(f"Compute: {compute_type.upper()}")
     
     try:
-        # Phase 1: Create pod
-        pod_id = create_pod(config)
+        # Phase 1: Create pod (GPU via GraphQL, CPU via REST)
+        if compute_type == "cpu":
+            pod_id = create_cpu_pod(config)
+        else:
+            pod_id = create_pod(config)
         
         # Phase 2: Wait for pod to be ready
         ssh_ip, ssh_port = wait_for_pod_ready(pod_id)
