@@ -498,7 +498,23 @@ def setup_remote_environment(pod_name, config):
         print(f"   UV cache: {uv_cache_dir} (persistent)")
     
     commands = []
-    
+
+    # Bootstrap `uv` if missing. The runpod-ubuntu template (used by CPU pods)
+    # is bare Ubuntu and lacks uv; the GPU torch templates already have it.
+    # Idempotent: no-op when uv is on PATH. Symlinks into /usr/local/bin so
+    # subsequent non-interactive SSH commands can find it without sourcing
+    # ~/.bashrc or ~/.profile.
+    print("   Ensure `uv` is installed (no-op if already present)")
+    commands.append(
+        "if ! command -v uv >/dev/null 2>&1; then "
+        "echo 'Installing uv...'; "
+        "curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null && "
+        "ln -sf /root/.local/bin/uv /usr/local/bin/uv && "
+        "ln -sf /root/.local/bin/uvx /usr/local/bin/uvx && "
+        "echo 'uv installed at:' \"$(command -v uv)\"; "
+        "else echo \"uv already present at $(command -v uv)\"; fi"
+    )
+
     if config.get("claude_config_dir_in_bashrc", False):
         print("   ~/.bashrc: append export CLAUDE_CONFIG_DIR=/workspace/.claude (if missing)")
         # Append CLAUDE_CONFIG_DIR to ~/.bashrc (idempotent: skip if line already present)
