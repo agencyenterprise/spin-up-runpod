@@ -1,36 +1,33 @@
 # CPU-only RunPod config.
 #
-# CPU pods are created via the REST API (POST https://rest.runpod.io/v1/pods),
-# not the GraphQL `podFindAndDeployOnDemand` mutation, which is GPU-only.
+# CPU pods are created via the same GraphQL mutation as GPU pods
+# (`podFindAndDeployOnDemand`), just with computeType=CPU and instanceIds
+# instead of gpuTypeId.
 
 compute_type: cpu  # required to take the CPU codepath
 
 pod_name: my-cpu-pod
-template_id: runpod-ubuntu  # CPU-friendly template; custom images are not
-                            # supported by the CPU pod API at the moment.
+template_id: runpod-ubuntu  # CPU pods don't support custom Docker images
 
-# CPU sizing
-# Valid cpu_flavors: cpu3c, cpu3g, cpu3m, cpu5c, cpu5g, cpu5m
-#   - cpu3* = 3rd-gen, cpu5* = 5th-gen
-#   - *c = compute-optimized, *g = general, *m = memory-optimized
-cpu_flavors:
-  - cpu3c
-  - cpu5c
-vcpu_count: 4
-cpu_flavor_priority: availability  # or "custom" to honor cpu_flavors order
+# Instance IDs follow `<flavor>-<vcpu>-<ram_gb>`.
+# Flavor families (RAM per vCPU):
+#   cpu3c / cpu5c (compute-optimized): 2 GB/vCPU  -> e.g. cpu3c-4-8
+#   cpu3g / cpu5g (general-purpose):   4 GB/vCPU  -> e.g. cpu3g-4-16
+#   cpu3m / cpu5m (memory-optimized):  8 GB/vCPU  -> e.g. cpu3m-4-32
+# RunPod tries the IDs in order until one is available; list a few
+# alternatives to improve scheduling.
+instance_ids:
+  - cpu3g-4-16
+  - cpu5g-4-16
 
 # Storage
 disk_space_gb: 50
 # network_volume_id: your_volume_id  # optional; mounts at /workspace and pins
                                      # the pod to the volume's datacenter
-# data_center_ids: [EU-RO-1, US-KS-2]  # optional; ignored if a network volume
-                                       # is set (datacenter is derived from it)
 
-# Cloud + scheduling
-cloud_type: SECURE  # SECURE or COMMUNITY
-interruptible: false  # true => spot pricing, can be preempted
-ports:
-  - 22/tcp
+# Cloud
+cloud_type: ALL  # ALL, SECURE, or COMMUNITY
+# ports: 22/tcp  # usually unneeded; the runpod-ubuntu template handles SSH
 
 # Remote environment setup (same as GPU configs)
 venv_path: /tmp/venv

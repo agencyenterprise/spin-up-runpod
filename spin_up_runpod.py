@@ -10,6 +10,7 @@ Automates the process of:
 """
 
 import os
+import re
 import sys
 import time
 import yaml
@@ -28,11 +29,39 @@ if not RUNPOD_API_KEY:
     sys.exit(1)
 
 RUNPOD_API_URL = "https://api.runpod.io/graphql"
-RUNPOD_REST_URL = "https://rest.runpod.io/v1"
 
-# CPU flavor IDs accepted by the RunPod REST API (computeType=CPU).
-# Source: https://docs.runpod.io/api-reference/pods/POST/pods
-CPU_FLAVOR_IDS = ["cpu3c", "cpu3g", "cpu3m", "cpu5c", "cpu5g", "cpu5m"]
+# CPU flavor families. Instance IDs follow `<flavor>-<vcpu>-<ram_gb>`, e.g.
+# `cpu3g-4-16` = 4 vCPU + 16 GB RAM on the cpu3g flavor. RAM-per-vCPU ratio:
+#   *c (compute-optimized): 2 GB/vCPU
+#   *g (general-purpose):   4 GB/vCPU
+#   *m (memory-optimized):  8 GB/vCPU
+CPU_FLAVOR_FAMILIES = ["cpu3c", "cpu3g", "cpu3m", "cpu5c", "cpu5g", "cpu5m"]
+CPU_RAM_PER_VCPU = {"c": 2, "g": 4, "m": 8}  # GB of RAM per vCPU per flavor suffix
+CPU_INSTANCE_ID_RE = re.compile(r"^cpu([35])([cgm])-(\d+)-(\d+)$")
+
+
+def validate_cpu_instance_id(instance_id):
+    """Return (vcpu, ram_gb) if the instance ID is well-formed and the RAM
+    matches the flavor's RAM-per-vCPU ratio. Raise ValueError otherwise."""
+    m = CPU_INSTANCE_ID_RE.match(instance_id)
+    if not m:
+        raise ValueError(
+            f"Invalid CPU instance ID format: {instance_id!r}. "
+            f"Expected `<flavor>-<vcpu>-<ram_gb>` like cpu3g-4-16 or cpu3m-4-32. "
+            f"Flavor families: {CPU_FLAVOR_FAMILIES}."
+        )
+    _gen, suffix, vcpu_s, ram_s = m.groups()
+    vcpu, ram_gb = int(vcpu_s), int(ram_s)
+    expected_ram = vcpu * CPU_RAM_PER_VCPU[suffix]
+    if ram_gb != expected_ram:
+        raise ValueError(
+            f"Invalid CPU instance ID {instance_id!r}: flavor cpu*{suffix} provides "
+            f"{CPU_RAM_PER_VCPU[suffix]} GB RAM/vCPU, so {vcpu} vCPU must have "
+            f"{expected_ram} GB RAM (got {ram_gb}). "
+            f"Try {instance_id.rsplit('-', 1)[0]}-{expected_ram}, or switch flavor "
+            f"family (c=2 GB/vCPU, g=4 GB/vCPU, m=8 GB/vCPU)."
+        )
+    return vcpu, ram_gb
 
 
 def graphql_query(query, variables=None):
@@ -191,20 +220,31 @@ def create_pod(config):
 
 
 def create_cpu_pod(config):
-    """Create a CPU-only RunPod via the REST API.
+    """Create a CPU-only RunPod via the `deployCpuPod` GraphQL mutation.
 
-    Uses POST https://rest.runpod.io/v1/pods with computeType=CPU. The legacy
-    GraphQL `podFindAndDeployOnDemand` mutation is GPU-only, and the
-    `deployCpuPod` mutation is undocumented; the REST endpoint is the
-    officially supported way to create CPU pods.
+    `podFindAndDeployOnDemand` is GPU-only at the resolver layer (it requires
+    gpuTypeId even when computeType=CPU is set). The RunPod web UI uses a
+    separate mutation, `deployCpuPod`, which is undocumented but stable.
+    Its input takes a single required `instanceId: String!` of the form
+    `<flavor>-<vcpu>-<ram_gb>` (e.g. cpu3g-4-16, cpu3m-4-32).
+
+    Since the mutation only accepts one instance ID per call, we iterate
+    over the user's `instance_ids` list and try each in order until one
+    succeeds. This mimics the "list of preferences" behavior the GPU code
+    gets for free from gpuTypeIdList.
+
+    RAM-per-vCPU by flavor family:
+        cpu*c (compute):  2 GB/vCPU  (e.g. cpu3c-4-8)
+        cpu*g (general):  4 GB/vCPU  (e.g. cpu3g-4-16)
+        cpu*m (memory):   8 GB/vCPU  (e.g. cpu3m-4-32)
     """
     print(f"\n🚀 Creating CPU pod: {config['pod_name']}")
 
     ssh_keys = get_ssh_keys()
     print("✓ Retrieved SSH keys from account")
 
-    # Detect datacenter from network volume (CPU pods, like GPU pods, must run
-    # in the same datacenter as any attached network volume).
+    # Pin to the network volume's datacenter when one is attached, just like
+    # the GPU code path.
     network_volume_id = config.get("network_volume_id")
     datacenter_id = None
     if network_volume_id:
@@ -216,86 +256,97 @@ def create_cpu_pod(config):
     else:
         print("✓ No network volume specified - searching all datacenters")
 
-    # Validate CPU flavors.
-    cpu_flavors = config.get("cpu_flavors")
-    if not cpu_flavors:
+    instance_ids = config.get("instance_ids")
+    if not instance_ids:
         raise ValueError(
-            "CPU pod config must specify `cpu_flavors` (e.g. [cpu3c, cpu5c]). "
-            f"Valid values: {CPU_FLAVOR_IDS}"
+            "CPU pod config must specify `instance_ids` as a list of CPU "
+            "instance IDs in the form `<flavor>-<vcpu>-<ram_gb>`, e.g. "
+            "[cpu3g-4-16, cpu5g-4-16]. Flavor families: "
+            f"{CPU_FLAVOR_FAMILIES} (c=2GB/vCPU, g=4GB/vCPU, m=8GB/vCPU)."
         )
-    invalid = [f for f in cpu_flavors if f not in CPU_FLAVOR_IDS]
-    if invalid:
-        raise ValueError(
-            f"Invalid cpu_flavors: {invalid}. Valid values: {CPU_FLAVOR_IDS}"
-        )
+    for iid in instance_ids:
+        validate_cpu_instance_id(iid)
 
-    vcpu_count = config.get("vcpu_count", 2)
-    cpu_flavor_priority = config.get("cpu_flavor_priority", "availability")
-    if cpu_flavor_priority not in ("availability", "custom"):
-        raise ValueError(
-            f"cpu_flavor_priority must be 'availability' or 'custom', got: {cpu_flavor_priority}"
-        )
+    env_vars = [{"key": "PUBLIC_KEY", "value": ssh_keys}]
+    cloud_type = config.get("cloud_type", "ALL")  # CloudTypeEnum: SECURE | COMMUNITY | ALL
 
-    # Build REST payload. Note: the REST API takes env as an object
-    # ({KEY: value}), unlike the GraphQL API which takes a list of
-    # {key, value} pairs.
-    payload = {
-        "computeType": "CPU",
-        "cloudType": config.get("cloud_type", "SECURE"),
+    mutation = """
+    mutation CreateCpuPod($input: deployCpuPodInput!) {
+        deployCpuPod(input: $input) {
+            id
+            desiredStatus
+            imageName
+            env
+            machineId
+            vcpuCount
+            memoryInGb
+            cpuFlavorId
+            machine {
+                dataCenterId
+                cpuType { id displayName manufacturer }
+            }
+        }
+    }
+    """
+
+    base_input = {
         "name": config["pod_name"],
         "templateId": config["template_id"],
-        "cpuFlavorIds": cpu_flavors,
-        "cpuFlavorPriority": cpu_flavor_priority,
-        "vcpuCount": vcpu_count,
-        "env": {"PUBLIC_KEY": ssh_keys},
-        "ports": config.get("ports", ["22/tcp"]),
-        "interruptible": config.get("interruptible", False),
+        "cloudType": cloud_type,
+        "startSsh": True,
+        "env": env_vars,
+        "ports": (
+            ",".join(config["ports"]) if isinstance(config.get("ports"), list)
+            else config.get("ports", "22/tcp")
+        ),
     }
 
     if network_volume_id:
-        payload["networkVolumeId"] = network_volume_id
-        payload["containerDiskInGb"] = config.get("disk_space_gb", 50)
-        print(f"✓ Container disk: {payload['containerDiskInGb']}GB (root /)")
-        print(f"✓ Network volume: {network_volume_id} (mounted at /workspace)")
+        base_input["networkVolumeId"] = network_volume_id
+        base_input["volumeMountPath"] = config.get("volume_mount_path", "/workspace")
+        base_input["containerDiskInGb"] = config.get("disk_space_gb", 50)
+        print(f"✓ Container disk: {base_input['containerDiskInGb']}GB (root /)")
+        print(f"✓ Network volume: {network_volume_id} (mounted at {base_input['volumeMountPath']})")
     else:
-        payload["volumeInGb"] = config.get("disk_space_gb", 50)
-        print(f"✓ Pod volume: {payload['volumeInGb']}GB (no network volume)")
+        base_input["containerDiskInGb"] = config.get("disk_space_gb", 50)
+        print(f"✓ Container disk: {base_input['containerDiskInGb']}GB (no network volume)")
 
     if datacenter_id:
-        # REST API takes a list of acceptable datacenters. Pin to the network
-        # volume's datacenter when one is set.
-        payload["dataCenterIds"] = [datacenter_id]
-    elif config.get("data_center_ids"):
-        payload["dataCenterIds"] = config["data_center_ids"]
+        base_input["dataCenterId"] = datacenter_id
 
-    print(
-        f"✓ Requesting {vcpu_count} vCPU(s) on flavors {cpu_flavors} "
-        f"(priority={cpu_flavor_priority})"
-    )
+    print(f"✓ Will try CPU instance(s) in order: {instance_ids}")
 
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {RUNPOD_API_KEY}",
-    }
-    response = requests.post(
-        f"{RUNPOD_REST_URL}/pods", json=payload, headers=headers
-    )
-    if response.status_code >= 400:
-        # Surface the API error body so the user can see what was wrong with
-        # the request (e.g. invalid flavor, no availability, bad template).
+    pod = None
+    last_error = None
+    for instance_id in instance_ids:
+        attempt_input = dict(base_input, instanceId=instance_id)
+        print(f"   → Trying {instance_id}...")
         try:
-            err_body = response.json()
-        except ValueError:
-            err_body = response.text
+            data = graphql_query(mutation, {"input": attempt_input})
+            pod = data["deployCpuPod"]
+            if pod and pod.get("id"):
+                print(f"   ✓ {instance_id} accepted")
+                break
+            last_error = f"deployCpuPod returned null for {instance_id}"
+        except Exception as e:
+            # Common case: no availability for this flavor right now. Try next.
+            last_error = str(e)
+            print(f"   ✗ {instance_id} unavailable: {str(e)[:200]}")
+            continue
+
+    if pod is None or not pod.get("id"):
         raise Exception(
-            f"RunPod REST error {response.status_code}: {json.dumps(err_body, indent=2) if isinstance(err_body, dict) else err_body}"
+            f"None of the requested CPU instance IDs were available. "
+            f"Last error: {last_error}"
         )
 
-    pod = response.json()
     print(f"✅ CPU pod created! ID: {pod['id']}")
     flavor = pod.get("cpuFlavorId") or "(pending assignment)"
-    print(f"   CPU flavor: {flavor}")
-    print(f"   vCPUs: {pod.get('vcpuCount', vcpu_count)}")
+    cpu_disp = ((pod.get("machine") or {}).get("cpuType") or {}).get("displayName")
+    print(f"   Instance: {flavor}")
+    print(f"   vCPUs: {pod.get('vcpuCount')}, RAM: {pod.get('memoryInGb')} GB")
+    if cpu_disp:
+        print(f"   CPU: {cpu_disp}")
 
     return pod["id"]
 
